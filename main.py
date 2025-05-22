@@ -82,7 +82,7 @@ elif mode == "퀴즈 시작":
         else:
             quiz_data = random.sample(data, min(10, len(data)))
             for idx, q in enumerate(quiz_data):
-                st.write(f"#### Q{idx+1}. {q['단어'] if 'b2e8어' in q else q['영단어']}")
+                st.write(f"#### Q{idx+1}. {q['단어'] if '영단어' in q else q['영단어']}")
                 ans = st.text_input("답안: ", key=f"answer_{idx}")
     except Exception as e:
         st.error(f"데이터 조회 시 오류 발생: {e}")
