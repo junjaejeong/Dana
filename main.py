@@ -5,14 +5,14 @@ from datetime import datetime
 import random
 import pandas as pd
 
-# ✅ 1. Streamlit secrets에서 JSON 문자열 불러오기
+# ✅ 1. Streamlit secrets에서 JSON 문자열 발환
 google_sheet_json_str = st.secrets["GOOGLE_SHEET_JSON"]
 
-# ✅ 2. 문자열 → 딕셔너리로 변환
+# ✅ 2. 문자열 → 디카에드로 변환
 try:
     credentials_dict = json.loads(google_sheet_json_str)
 except json.JSONDecodeError as e:
-    st.error("❌ GOOGLE_SHEET_JSON가 유효한 JSON 형식이 아님니다.")
+    st.error("❌ GOOGLE_SHEET_JSON이 유효한 JSON 형식이 아님니다.")
     st.error(f"JSON 오류: {e}")
     st.stop()
 
@@ -30,7 +30,6 @@ SPREADSHEET_URL = "https://docs.google.com/spreadsheets/d/1LeJbpsS1eOzf2ZT8qIWhz
 
 try:
     sheet = client.open_by_url(SPREADSHEET_URL).sheet1
-    st.success("✅ Google 스프레드시트 연결 성공!")
 except gspread.exceptions.SpreadsheetNotFound:
     st.error("❌ 스프레드시트를 찾을 수 없습니다. URL이 정확한지, 서비스 계정이 편집자로 추가되어있는지 확인해주세요.")
     st.stop()
@@ -46,10 +45,44 @@ except Exception as e:
     st.error(f"오류 메시지: {e}")
     st.stop()
 
-# ✅ 5. 연결한 sheet에서 데이터 가져오기
-try:
-    data = sheet.get_all_records()
-    df = pd.DataFrame(data)
-    st.write("### 데이터 조회", df)
-except Exception as e:
-    st.error(f"데이터 로드 실패: {e}")
+# ✅ 5. 무시메시 구성
+st.set_page_config(page_title="영단어 학습 앱", layout="wide")
+mode = st.sidebar.radio("🔀 모드 선택", ["단어 등록", "퀴즈 시작"], index=1)
+
+# ✅ 6. 단어 등록 모드
+if mode == "단어 등록":
+    st.header("📅 단어 등록")
+    st.write("영어 단어과 한국어 또는 희생어 목록을 입력해주세요.")
+
+    inputs = []
+    for i in range(10):
+        c1, c2 = st.columns(2)
+        with c1:
+            eng = st.text_input(f"{i+1}. 영어 단어", key=f"eng_{i}")
+        with c2:
+            kor = st.text_input(f"{i+1}. 한국어 또는 희생어", key=f"kor_{i}")
+        inputs.append((eng, kor))
+
+    if st.button("📅 저장하기"):
+        today = datetime.now().strftime("%Y-%m-%d")
+        cnt = 0
+        for eng, kor in inputs:
+            if eng and kor:
+                sheet.append_row([eng.strip(), kor.strip(), today])
+                cnt += 1
+        st.success(f"✅ {cnt}개 단어가 저장되었습니다.")
+
+# ✅ 7. 퀴즈 모드
+elif mode == "퀴즈 시작":
+    st.header("Dana's 영어 단어 퀴즈")
+    try:
+        data = sheet.get_all_records()
+        if not data:
+            st.info("등록된 단어가 없습니다.")
+        else:
+            quiz_data = random.sample(data, min(10, len(data)))
+            for idx, q in enumerate(quiz_data):
+                st.write(f"#### Q{idx+1}. {q['단어'] if 'b2e8어' in q else q['영단어']}")
+                ans = st.text_input("답안: ", key=f"answer_{idx}")
+    except Exception as e:
+        st.error(f"데이터 조회 시 오류 발생: {e}")
