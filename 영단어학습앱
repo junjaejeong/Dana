@@ -4,13 +4,16 @@ from oauth2client.service_account import ServiceAccountCredentials
 from datetime import datetime
 import random
 import pandas as pd
+import json
+from io import StringIO
 
 # ─── 1) Google Sheets 인증 & 시트 연결 ────────────────────────────
-scope = ["https://spreadsheets.google.com/feeds","https://www.googleapis.com/auth/drive"]
-creds = ServiceAccountCredentials.from_json_keyfile_name(
-    "C:/Users/Triple J/Desktop/다솜/영단어/youtube-tutor-search-90112becbd81.json", scope
-)
+scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
+json_str = st.secrets["GOOGLE_SHEET_JSON"]
+creds_dict = json.loads(json_str)
+creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
 client = gspread.authorize(creds)
+
 sheet = client.open_by_url(
     "https://docs.google.com/spreadsheets/d/1LeJbpsS1eOzf2ZT8qIWhzYOf3hrdqefyoV3Qf9o2EgQ/edit"
 ).sheet1
@@ -81,20 +84,13 @@ if "quiz_started" not in st.session_state:
 if not st.session_state.quiz_started:
     st.write("#### 기간과 문제 유형을 선택하고 ▶️ 시작 버튼을 누르세요")
     
-    # 기간 선택 방식 라디오 버튼
     date_mode = st.radio("📅 기간 선택 방식", ["특정 날짜", "기간 범위"])
     
     if date_mode == "특정 날짜":
         sel_date = st.date_input("날짜 선택")
         start_date = end_date = sel_date
     else:
-        # 기간 범위 선택
-        date_range = st.date_input(
-            "기간 범위 선택",
-            value=(),
-            help="시작 날짜와 종료 날짜를 순서대로 선택하세요"
-        )
-        
+        date_range = st.date_input("기간 범위 선택", value=())
         if len(date_range) == 2:
             start_date, end_date = date_range
         elif len(date_range) == 1:
@@ -110,7 +106,6 @@ if not st.session_state.quiz_started:
         if date_mode == "기간 범위" and (start_date is None or end_date is None):
             st.warning("❌ 기간을 올바르게 선택해주세요.")
         else:
-            # 선택된 기간 범위 내의 단어들 필터링
             rows = []
             for r in data:
                 upload_date_str = r.get("업로드날짜", "").strip()
@@ -120,13 +115,11 @@ if not st.session_state.quiz_started:
                         if start_date <= upload_date <= end_date:
                             rows.append(r)
                     except ValueError:
-                        continue  # 날짜 형식이 잘못된 경우 스킵
+                        continue
             
             if not rows:
-                if date_mode == "특정 날짜":
-                    st.warning(f"❌ {start_date.strftime('%Y-%m-%d')}에 등록된 단어가 없습니다.")
-                else:
-                    st.warning(f"❌ {start_date.strftime('%Y-%m-%d')} ~ {end_date.strftime('%Y-%m-%d')} 기간에 등록된 단어가 없습니다.")
+                msg = f"{start_date.strftime('%Y-%m-%d')}" if date_mode == "특정 날짜" else f"{start_date.strftime('%Y-%m-%d')} ~ {end_date.strftime('%Y-%m-%d')}"
+                st.warning(f"❌ {msg}에 등록된 단어가 없습니다.")
             else:
                 st.session_state.quiz_data    = random.sample(rows, min(20, len(rows)))
                 st.session_state.quiz_type    = qtype
@@ -135,7 +128,7 @@ if not st.session_state.quiz_started:
                 st.session_state.all_answers  = []
                 st.session_state.answered     = False
                 st.session_state.retry        = False
-                st.rerun()  # st.stop() 대신 st.rerun() 사용
+                st.rerun()
     st.stop()
 
 # ─── 5.3) 퀴즈 종료 및 요약 ────────────────────────────────────────
@@ -145,20 +138,16 @@ if st.session_state.quiz_index >= len(st.session_state.quiz_data):
     st.markdown("#### 🎉 퀴즈 완료!")
     st.write(f"**총 {total}문제 중 {correct}문제 맞았습니다!**")
     df = pd.DataFrame(st.session_state.all_answers)
-    st.dataframe(
-        df.rename(columns={
-            "word":"영단어","meaning":"뜻",
-            "user_ans":"내 답안","correct_ans":"정답",
-            "is_correct":"정답여부"
-        }),
-        use_container_width=True
-    )
+    st.dataframe(df.rename(columns={
+        "word": "영단어", "meaning": "뜻",
+        "user_ans": "내 답안", "correct_ans": "정답",
+        "is_correct": "정답여부"
+    }), use_container_width=True)
+
     if not st.session_state.retry and correct < total:
         if st.button("🔄 오답 다시 풀기"):
             wrong = [a for a in st.session_state.all_answers if not a["is_correct"]]
-            st.session_state.quiz_data   = [
-                {"영단어":w["word"], "뜻":w["meaning"]} for w in wrong
-            ]
+            st.session_state.quiz_data   = [{"영단어":w["word"], "뜻":w["meaning"]} for w in wrong]
             st.session_state.quiz_index  = 0
             st.session_state.all_answers = []
             st.session_state.answered    = False
@@ -170,61 +159,36 @@ if st.session_state.quiz_index >= len(st.session_state.quiz_data):
 q = st.session_state.quiz_data[st.session_state.quiz_index]
 st.write(f"#### 문제 {st.session_state.quiz_index+1} / {len(st.session_state.quiz_data)}")
 
-# 혼합 모드에서 각 문제의 유형을 세션에 저장
 q_type = st.session_state.quiz_type
 if q_type == "혼합":
-    # 각 문제의 유형을 세션에 한 번만 저장
     type_key = f"qtype_{st.session_state.quiz_index}"
     if type_key not in st.session_state:
-        st.session_state[type_key] = random.choice(["객관식","주관식"])
+        st.session_state[type_key] = random.choice(["객관식", "주관식"])
     q_type = st.session_state[type_key]
 
-# ─── 5.4.1) 객관식 문제 ────────────────────────────────────────────
 if q_type == "객관식":
-    # CSS: 보기 세로 배치 및 정렬
-    st.markdown(
-        """<style>
-        div[role='radiogroup'] > label {
-            display: flex !important;
-            align-items: center !important;
-            margin-bottom: 0.5rem !important;
-            margin-right: 0 !important;
-        }
-        div[role='radiogroup'] > label > div:first-child {
-            margin-right: 0.5rem !important;
-        }
-        </style>""",
-        unsafe_allow_html=True
-    )
+    st.markdown("""<style>div[role='radiogroup'] > label {
+        display: flex !important; align-items: center !important;
+        margin-bottom: 0.5rem !important; margin-right: 0 !important;
+    }</style>""", unsafe_allow_html=True)
 
-    # 문제 방향 결정 (한글→영어 or 영어→한글)
     direction_key = f"direction_{st.session_state.quiz_index}"
     if direction_key not in st.session_state:
         st.session_state[direction_key] = random.choice(["kor_to_eng", "eng_to_kor"])
     direction = st.session_state[direction_key]
 
-    # 옵션을 세션에 한 번만 생성
     opt_key = f"opts_{st.session_state.quiz_index}"
     if opt_key not in st.session_state:
         if direction == "kor_to_eng":
-            # 한글 문제 → 영어 선택지
-            distractors = [
-                d["영단어"] for d in data
-                if d["영단어"].strip().lower() != q["영단어"].strip().lower()
-            ]
+            distractors = [d["영단어"] for d in data if d["영단어"].strip().lower() != q["영단어"].strip().lower()]
             opts = random.sample(distractors, min(3, len(distractors))) + [q["영단어"]]
         else:
-            # 영어 문제 → 한글 선택지
-            distractors = [
-                d["뜻"] for d in data
-                if d["뜻"].strip().lower() != q["뜻"].strip().lower()
-            ]
+            distractors = [d["뜻"] for d in data if d["뜻"].strip().lower() != q["뜻"].strip().lower()]
             opts = random.sample(distractors, min(3, len(distractors))) + [q["뜻"]]
         random.shuffle(opts)
         st.session_state[opt_key] = opts
     options = st.session_state[opt_key]
 
-    # 문제 출제
     if direction == "kor_to_eng":
         question_text = f'"{q["뜻"]}"에 해당하는 영어 단어는?'
         correct_answer = q["영단어"]
@@ -232,81 +196,61 @@ if q_type == "객관식":
         question_text = f'"{q["영단어"]}"의 뜻은?'
         correct_answer = q["뜻"]
 
-    # 라디오 (key 지정)
     sel_key = f"sel_{st.session_state.quiz_index}"
-    selected = st.radio(
-        question_text,
-        options,
-        key=sel_key
-    )
+    selected = st.radio(question_text, options, key=sel_key)
 
-    # 정답 확인 전/후에 따라 다른 UI 표시
     if not st.session_state.answered:
-        # 정답 확인 전: 정답 확인하기 버튼
         if st.button("정답 확인하기", key=f"check_btn_{st.session_state.quiz_index}"):
             is_corr = (selected.strip().lower() == correct_answer.strip().lower())
             st.session_state.all_answers.append({
-                "word":        q["영단어"],
-                "meaning":     q["뜻"],
-                "user_ans":    selected,
-                "correct_ans": correct_answer,
-                "is_correct":  is_corr
+                "word": q["영단어"], "meaning": q["뜻"],
+                "user_ans": selected, "correct_ans": correct_answer,
+                "is_correct": is_corr
             })
             st.session_state.answered = True
-            st.rerun()  # 즉시 화면 갱신
+            st.rerun()
     else:
-        # 정답 확인 후: 결과 표시 + 다음 문제 풀기 버튼
         last_answer = st.session_state.all_answers[-1]
         if last_answer["is_correct"]:
             st.success("✅ 정답입니다!")
         else:
             st.error(f"❌ 오답입니다. 정답: {correct_answer}")
-        
+
         if st.button("▶️ 다음 문제 풀기", key=f"next_btn_{st.session_state.quiz_index}"):
-            # 다음 문제 전 옵션/선택/문제유형/방향 삭제
             st.session_state.pop(opt_key, None)
             st.session_state.pop(sel_key, None)
             st.session_state.pop(direction_key, None)
             if st.session_state.quiz_type == "혼합":
                 st.session_state.pop(f"qtype_{st.session_state.quiz_index}", None)
             st.session_state.quiz_index += 1
-            st.session_state.answered   = False
-            st.rerun()  # 즉시 화면 갱신
+            st.session_state.answered = False
+            st.rerun()
 
-# ─── 5.4.2) 주관식 문제 ────────────────────────────────────────────
 elif q_type == "주관식":
     inp_key = f"input_{st.session_state.quiz_index}"
-    ans     = st.text_input(
-        f'"{q["뜻"]}"에 해당하는 영어 단어는?',
-        key=inp_key
-    )
-    
-    # 정답 확인 전/후에 따라 다른 UI 표시
+    ans = st.text_input(f'"{q["뜻"]}"에 해당하는 영어 단어는?', key=inp_key)
+
     if not st.session_state.answered:
-        # 정답 확인 전: 정답 확인하기 버튼
         if st.button("정답 확인하기", key=f"check_sa_btn_{st.session_state.quiz_index}"):
             is_corr = (ans.strip().lower() == q["영단어"].strip().lower())
             st.session_state.all_answers.append({
-                "word":        q["영단어"],
-                "meaning":     q["뜻"],
-                "user_ans":    ans,
-                "correct_ans": q["영단어"],
-                "is_correct":  is_corr
+                "word": q["영단어"], "meaning": q["뜻"],
+                "user_ans": ans, "correct_ans": q["영단어"],
+                "is_correct": is_corr
             })
             st.session_state.answered = True
-            st.rerun()  # 즉시 화면 갱신
+            st.rerun()
     else:
-        # 정답 확인 후: 결과 표시 + 다음 문제 풀기 버튼
         last_answer = st.session_state.all_answers[-1]
         if last_answer["is_correct"]:
             st.success("✅ 정답입니다!")
         else:
             st.error(f"❌ 오답입니다. 정답: {q['영단어']}")
-        
+
         if st.button("▶️ 다음 문제 풀기", key=f"next_sa_btn_{st.session_state.quiz_index}"):
             st.session_state.pop(inp_key, None)
             if st.session_state.quiz_type == "혼합":
                 st.session_state.pop(f"qtype_{st.session_state.quiz_index}", None)
             st.session_state.quiz_index += 1
-            st.session_state.answered   = False
-            st.rerun()  # 즉시 화면 갱신
+            st.session_state.answered = False
+            st.rerun()
