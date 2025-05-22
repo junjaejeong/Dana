@@ -59,13 +59,29 @@ if mode == "단어 등록":
             cnt = 0
             for eng, kor in inputs:
                 if eng and kor:
+                    # append_row는 쓰기 작업이므로 캐시하면 안 됩니다.
                     sheet.append_row([eng.strip(), kor.strip(), today])
                     cnt += 1
             st.success(f"✅ {cnt}개 단어가 저장되었습니다.")
+            # 데이터가 업데이트되었으므로 캐시를 지워 다음 읽기 시에는 새 데이터를 가져오도록 함
+            st.cache_data.clear() # <- 중요: 데이터를 업데이트했으니 캐시를 지웁니다.
     st.stop()
 
 # ─── 5) 퀴즈 모드 ───────────────────────────────────────────────────
-data = sheet.get_all_records()
+
+# Google Sheets에서 모든 데이터를 가져오는 함수를 정의하고 캐시합니다.
+# @st.cache_data(ttl=3600) # 1시간마다 캐시 갱신 (선택 사항)
+@st.cache_data
+def load_quiz_data(sheet_obj):
+    """
+    Google Sheets에서 모든 데이터를 가져와 캐시하는 함수.
+    이 함수는 sheet_obj의 변화가 없으면 다시 실행되지 않습니다.
+    """
+    return sheet_obj.get_all_records()
+
+# 캐시된 함수를 호출하여 데이터를 가져옵니다.
+data = load_quiz_data(sheet) # <- 수정된 부분
+
 st.header("Dana's 영어 단어 퀴즈")
 
 # ─── 5.1) 세션 초기화 ─────────────────────────────────────────────
@@ -107,7 +123,7 @@ if not st.session_state.quiz_started:
             st.warning("❌ 기간을 올바르게 선택해주세요.")
         else:
             rows = []
-            for r in data:
+            for r in data: # <- 이미 캐시된 데이터를 사용
                 upload_date_str = r.get("업로드날짜", "").strip()
                 if upload_date_str:
                     try:
@@ -151,7 +167,7 @@ if st.session_state.quiz_index >= len(st.session_state.quiz_data):
             st.session_state.quiz_index  = 0
             st.session_state.all_answers = []
             st.session_state.answered    = False
-            st.session_state.retry       = True
+            st.session_state.retry       = False
             st.rerun()
     st.stop()
 
