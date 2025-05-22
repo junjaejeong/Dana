@@ -8,7 +8,7 @@ import pandas as pd
 # ✅ 1. Streamlit secrets에서 JSON 문자열 발환
 google_sheet_json_str = st.secrets["GOOGLE_SHEET_JSON"]
 
-# ✅ 2. 문자열 → 디카에드로 변환
+# ✅ 2. 문자열 → 디션에드 변환
 try:
     credentials_dict = json.loads(google_sheet_json_str)
 except json.JSONDecodeError as e:
@@ -45,14 +45,14 @@ except Exception as e:
     st.error(f"오류 메시지: {e}")
     st.stop()
 
-# ✅ 5. 무시메시 구성
+# ✅ 5. 페이지 설정
 st.set_page_config(page_title="영단어 학습 앱", layout="wide")
 mode = st.sidebar.radio("🔀 모드 선택", ["단어 등록", "퀴즈 시작"], index=1)
 
 # ✅ 6. 단어 등록 모드
 if mode == "단어 등록":
-    st.header("📅 단어 등록")
-    st.write("영어 단어과 한국어 또는 희생어 목록을 입력해주세요.")
+    st.header("📥 단어 등록")
+    st.write("영어 단어와 한국어 뜻을 입력하세요.")
 
     inputs = []
     for i in range(10):
@@ -60,10 +60,10 @@ if mode == "단어 등록":
         with c1:
             eng = st.text_input(f"{i+1}. 영어 단어", key=f"eng_{i}")
         with c2:
-            kor = st.text_input(f"{i+1}. 한국어 또는 희생어", key=f"kor_{i}")
+            kor = st.text_input(f"{i+1}. 뜻", key=f"kor_{i}")
         inputs.append((eng, kor))
 
-    if st.button("📅 저장하기"):
+    if st.button("💾 저장하기"):
         today = datetime.now().strftime("%Y-%m-%d")
         cnt = 0
         for eng, kor in inputs:
@@ -76,13 +76,17 @@ if mode == "단어 등록":
 elif mode == "퀴즈 시작":
     st.header("Dana's 영어 단어 퀴즈")
     try:
-        data = sheet.get_all_records()
-        if not data:
-            st.info("등록된 단어가 없습니다.")
+        raw_data = sheet.get_all_values()
+        if len(raw_data) < 2:
+            st.info("등록된 단어가 충분하지 않습니다.")
         else:
-            quiz_data = random.sample(data, min(10, len(data)))
-            for idx, q in enumerate(quiz_data):
-                st.write(f"#### Q{idx+1}. {q['단어'] if '영단어' in q else q['영단어']}")
-                ans = st.text_input("답안: ", key=f"answer_{idx}")
+            df = pd.DataFrame(raw_data[1:], columns=raw_data[0])
+            if '영단어' not in df.columns or '뜻' not in df.columns:
+                st.error("❌ 시트의 첫 행에 '영단어'와 '뜻' 컬럼명이 필요합니다.")
+            else:
+                quiz_data = df.sample(n=min(10, len(df)))
+                for idx, row in quiz_data.iterrows():
+                    st.write(f"#### Q{idx+1}. {row['뜻']}")
+                    ans = st.text_input("답안:", key=f"answer_{idx}")
     except Exception as e:
-        st.error(f"데이터 조회 시 오류 발생: {e}")
+        st.error(f"데이터 조회 또는 처리 중 오류 발생: {e}")
