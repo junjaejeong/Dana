@@ -8,15 +8,23 @@ import json
 from io import StringIO
 
 # ─── 1) Google Sheets 인증 & 시트 연결 ────────────────────────────
-scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
-json_str = st.secrets["GOOGLE_SHEET_JSON"]
-creds_dict = json.loads(json_str)
-creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
-client = gspread.authorize(creds)
 
-sheet = client.open_by_url(
-    "https://docs.google.com/spreadsheets/d/1LeJbpsS1eOzf2ZT8qIWhzYOf3hrdqefyoV3Qf9o2EgQ/edit"
-).sheet1
+# gspread 클라이언트와 시트 객체를 캐시하는 함수
+@st.cache_resource # 이전에 st.cache 또는 st.cache_data를 사용했을 수 있지만, 객체 초기화에는 st.cache_resource가 적합합니다.
+def get_gspread_client():
+    scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
+    json_str = st.secrets["GOOGLE_SHEET_JSON"]
+    creds_dict = json.loads(json_str)
+    creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
+    client = gspread.authorize(creds)
+    # sheet 객체까지 이 함수 안에서 열어서 반환
+    sheet = client.open_by_url(
+        "https://docs.google.com/spreadsheets/d/1LeJbpsS1eOzf2ZT8qIWhzYOf3hrdqefyoV3Qf9o2EgQ/edit"
+    ).sheet1
+    return sheet
+
+# 캐시된 함수를 호출하여 sheet 객체를 가져옵니다.
+sheet = get_gspread_client() # <- 이 부분이 핵심 수정 사항
 
 # ─── 2) 페이지 설정 & 모드 선택 ───────────────────────────────────
 st.set_page_config(page_title="영단어 학습 앱", layout="wide")
@@ -59,18 +67,22 @@ if mode == "단어 등록":
             cnt = 0
             for eng, kor in inputs:
                 if eng and kor:
-                    # append_row는 쓰기 작업이므로 캐시하면 안 됩니다.
                     sheet.append_row([eng.strip(), kor.strip(), today])
                     cnt += 1
             st.success(f"✅ {cnt}개 단어가 저장되었습니다.")
-            # 데이터가 업데이트되었으므로 캐시를 지워 다음 읽기 시에는 새 데이터를 가져오도록 함
-            st.cache_data.clear() # <- 중요: 데이터를 업데이트했으니 캐시를 지웁니다.
+            # 데이터가 업데이트되었으므로 데이터 캐시와 리소스 캐시를 모두 지웁니다.
+            # get_gspread_client() 함수의 결과물(sheet 객체) 자체가 캐시되어 있으므로,
+            # 데이터가 변경되면 이 캐시를 무효화하여 다음 번에 새로운 sheet 객체를 가져오도록 해야 합니다.
+            st.cache_resource.clear() # <- 중요: gspread 클라이언트 캐시를 지웁니다.
+            st.cache_data.clear()    # <- 데이터 캐시도 지웁니다.
+            st.rerun() # 변경된 데이터로 새로고침
     st.stop()
 
 # ─── 5) 퀴즈 모드 ───────────────────────────────────────────────────
 
 # Google Sheets에서 모든 데이터를 가져오는 함수를 정의하고 캐시합니다.
-# @st.cache_data(ttl=3600) # 1시간마다 캐시 갱신 (선택 사항)
+# sheet 객체는 이미 get_gspread_client()에서 캐시되었으므로, load_quiz_data는 sheet_obj의 변화를 감지하여 캐시를 무효화하지 않습니다.
+# 따라서 sheet_obj가 변경될 때 캐시를 지우도록 수동으로 제어해야 합니다.
 @st.cache_data
 def load_quiz_data(sheet_obj):
     """
@@ -80,7 +92,7 @@ def load_quiz_data(sheet_obj):
     return sheet_obj.get_all_records()
 
 # 캐시된 함수를 호출하여 데이터를 가져옵니다.
-data = load_quiz_data(sheet) # <- 수정된 부분
+data = load_quiz_data(sheet) # <- 수정된 부분 (함수 호출 방식은 동일)
 
 st.header("Dana's 영어 단어 퀴즈")
 
